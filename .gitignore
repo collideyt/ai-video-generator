@@ -1,0 +1,21 @@
+﻿# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Node
+node_modules/
+.next/
+
+# Generated files
+backend/outputs/
+backend/uploads/
+outputs/
+
+# Environment
+.env
+
+# Media
+*.mp4
+*.mov
+*.mp3
