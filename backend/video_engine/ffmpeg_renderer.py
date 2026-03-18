@@ -27,6 +27,7 @@ def render_video(
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
     print("Starting FFmpeg render")
     print("FFmpeg binary:", ffmpeg_path)
+    print("Scene rendering started")
 
     width, height = ASPECT_RATIOS.get(specs.get("aspect_ratio"), (1080, 1920))
 
@@ -39,14 +40,32 @@ def render_video(
             .replace("\n", " ")
         )
 
+    def _build_text_overlay(text: str) -> str:
+        safe = _escape_drawtext(text) if text else " "
+        print("Adding text overlay")
+        return (
+            f"drawtext=text='{safe}':fontcolor=white:fontsize=60:"
+            f"x=(w-text_w)/2:y=h-200:box=1:boxcolor=black@0.4:boxborderw=10"
+        )
+
     scene_files = []
     for idx, scene in enumerate(timeline["timeline"], start=0):
         scene_path = output_dir / f"scene_{idx}.mp4"
         asset = scene.get("asset")
         duration = scene["duration"]
-        scene_text = scene.get("scene_text") or ""
+        scene_text = scene.get("text") or scene.get("scene_text") or ""
+        transition = scene.get("transition", "cut")
 
-        if asset and asset.lower().endswith((".mp4", ".mov", ".mkv")):
+        if asset and asset.lower().endswith((".mp4", ".mov", ".mkv", ".webm")):
+            filters = [
+                f"scale={width}:{height}:force_original_aspect_ratio=decrease",
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+                _build_text_overlay(scene_text),
+            ]
+            if transition == "fade":
+                fade_out_start = max(duration - 0.5, 0)
+                filters.append(f"fade=t=in:st=0:d=0.5")
+                filters.append(f"fade=t=out:st={fade_out_start}:d=0.5")
             cmd = [
                 ffmpeg_path,
                 "-y",
@@ -55,12 +74,28 @@ def render_video(
                 "-t",
                 str(duration),
                 "-vf",
-                f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+                ",".join(filters),
                 "-r",
                 "30",
                 str(scene_path),
             ]
         elif asset:
+            filters = [
+                f"scale={width}:{height}:force_original_aspect_ratio=decrease",
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+                _build_text_overlay(scene_text),
+            ]
+            if transition == "zoom":
+                print("Applying zoom effect")
+                zoom_frames = max(int(duration * 30), 1)
+                filters.insert(
+                    2,
+                    f"zoompan=z='min(zoom+0.0015,1.4)':d={zoom_frames}:s={width}x{height}",
+                )
+            elif transition == "fade":
+                fade_out_start = max(duration - 0.5, 0)
+                filters.append(f"fade=t=in:st=0:d=0.5")
+                filters.append(f"fade=t=out:st={fade_out_start}:d=0.5")
             cmd = [
                 ffmpeg_path,
                 "-y",
@@ -71,17 +106,13 @@ def render_video(
                 "-t",
                 str(duration),
                 "-vf",
-                f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+                ",".join(filters),
                 "-r",
                 "30",
                 str(scene_path),
             ]
         else:
-            text = _escape_drawtext(scene_text) if scene_text else " "
-            draw = (
-                f"drawtext=text='{text}':fontcolor=white:fontsize=48:"
-                f"x=(w-text_w)/2:y=(h-text_h)/2"
-            )
+            text_filter = _build_text_overlay(scene_text)
             cmd = [
                 ffmpeg_path,
                 "-y",
@@ -90,7 +121,7 @@ def render_video(
                 "-i",
                 f"color=c=black:s={width}x{height}:d={duration}",
                 "-vf",
-                draw,
+                text_filter,
                 "-r",
                 "30",
                 str(scene_path),
@@ -136,6 +167,7 @@ def render_video(
         raise
 
     final_path = output_dir / "final_video.mp4"
+    print("Mixing audio tracks")
     if voiceover and music:
         audio_cmd = [
             ffmpeg_path,

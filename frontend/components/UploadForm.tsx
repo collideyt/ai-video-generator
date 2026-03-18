@@ -8,9 +8,13 @@ import { generateVideo } from "@/lib/api";
 
 interface UploadFormProps {
   onVideoReady: (url: string) => void;
+  onAspectRatioChange?: (value: VideoSpecs["aspect_ratio"]) => void;
 }
 
-export default function UploadForm({ onVideoReady }: UploadFormProps) {
+export default function UploadForm({
+  onVideoReady,
+  onAspectRatioChange,
+}: UploadFormProps) {
   const [script, setScript] = useState("");
   const [assets, setAssets] = useState<File[]>([]);
   const [logo, setLogo] = useState<File | null>(null);
@@ -54,7 +58,13 @@ export default function UploadForm({ onVideoReady }: UploadFormProps) {
         onLogoChange={setLogo}
         onMusicChange={setMusic}
       />
-      <SettingsPanel value={specs} onChange={setSpecs} />
+      <SettingsPanel
+        value={specs}
+        onChange={(nextSpecs) => {
+          setSpecs(nextSpecs);
+          onAspectRatioChange?.(nextSpecs.aspect_ratio);
+        }}
+      />
       <div className="flex flex-wrap items-center gap-4">
         <button
           type="button"

@@ -6,6 +6,9 @@ import VideoPreview from "@/components/VideoPreview";
 
 export default function UploadPage() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16" | "1:1">(
+    "9:16"
+  );
 
   return (
     <main className="min-h-screen bg-slate-950">
@@ -21,7 +24,10 @@ export default function UploadPage() {
 
         <div className="mt-8 grid gap-6 lg:grid-cols-[1.3fr,0.7fr]">
           <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-            <UploadForm onVideoReady={setVideoUrl} />
+            <UploadForm
+              onVideoReady={setVideoUrl}
+              onAspectRatioChange={setAspectRatio}
+            />
           </div>
           <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
             <h2 className="text-lg font-semibold">Preview</h2>
@@ -29,7 +35,10 @@ export default function UploadPage() {
               Rendered output will appear here once the pipeline completes.
             </p>
             <div className="mt-4">
-              <VideoPreview videoUrl={videoUrl ?? ""} />
+              <VideoPreview
+                videoUrl={videoUrl ?? ""}
+                aspectRatio={aspectRatio}
+              />
             </div>
           </div>
         </div>

@@ -13,6 +13,7 @@ def build_timeline(scenes: list[dict], specs: dict) -> dict:
                 "duration": scene["duration"],
                 "asset": scene.get("asset"),
                 "text": scene["scene_text"],
+                "type": scene.get("type", "content"),
                 "transition": scene.get("transition", "cut"),
             }
         )

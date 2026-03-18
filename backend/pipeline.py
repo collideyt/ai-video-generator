@@ -12,6 +12,7 @@ from video_engine.ffmpeg_renderer import render_video
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUTS_DIR = BASE_DIR / "outputs"
 UPLOADS_DIR = OUTPUTS_DIR / "uploads"
+LEGACY_UPLOADS_DIR = BASE_DIR / "uploads"
 
 
 def generate_video(script: str, assets: list[str], logo: str | None, music: str | None, specs: dict) -> str:
@@ -21,13 +22,17 @@ def generate_video(script: str, assets: list[str], logo: str | None, music: str 
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if not assets:
+        sources = []
         if UPLOADS_DIR.exists():
-            assets = [str(p) for p in UPLOADS_DIR.iterdir() if p.is_file()]
+            sources.append(UPLOADS_DIR)
+        if LEGACY_UPLOADS_DIR.exists():
+            sources.append(LEGACY_UPLOADS_DIR)
+        assets = [str(p) for src in sources for p in src.iterdir() if p.is_file()]
 
     scenes = split_script(script, target_duration=specs.get("duration", 30))
     planned_scenes = plan_scenes(scenes)
     matched_scenes = match_assets(planned_scenes, assets)
-    if assets and not any(scene.get("asset") for scene in matched_scenes):
+    if assets:
         asset_cycle = [str(Path(p).resolve()) for p in assets]
         for idx, scene in enumerate(matched_scenes):
             scene["asset"] = asset_cycle[idx % len(asset_cycle)]
