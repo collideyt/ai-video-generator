@@ -1,4 +1,4 @@
-﻿import type { VideoSpecs } from "@/components/SettingsPanel";
+import type { VideoSpecs } from "@/components/SettingsPanel";
 
 interface GenerateVideoRequest {
   script: string;
@@ -8,8 +8,30 @@ interface GenerateVideoRequest {
   specs: VideoSpecs;
 }
 
-interface GenerateVideoResponse {
-  video_url: string;
+export interface GenerateVideoResponse {
+  job_id: string;
+  status_url: string;
+  video_url: string | null;
+}
+
+export interface JobStatusResponse {
+  job_id: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  current_step: string;
+  steps: Array<{
+    label: string;
+    state: "pending" | "active" | "completed";
+  }>;
+  video_url: string | null;
+  error: string | null;
+  updated_at: string;
+}
+
+export interface LatestRenderResponse {
+  job_id?: string;
+  video_url: string | null;
+  updated_at?: string;
+  job_status?: JobStatusResponse | null;
 }
 
 export async function generateVideo({
@@ -36,7 +58,31 @@ export async function generateVideo({
   });
 
   if (!response.ok) {
-    throw new Error("Failed to generate video");
+    throw new Error("Failed to start video generation");
+  }
+
+  return response.json();
+}
+
+export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
+  const response = await fetch(`http://localhost:8000/job-status/${jobId}`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch job status");
+  }
+
+  return response.json();
+}
+
+export async function getLatestRender(): Promise<LatestRenderResponse> {
+  const response = await fetch("http://localhost:8000/latest-render", {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch latest render");
   }
 
   return response.json();

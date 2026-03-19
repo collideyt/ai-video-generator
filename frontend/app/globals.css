@@ -1,9 +1,16 @@
-﻿@tailwind base;
+@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
   color-scheme: dark;
+  --bg-primary: #040816;
+  --bg-secondary: #0b1220;
+  --card-border: rgba(148, 163, 184, 0.16);
+  --card-surface: rgba(15, 23, 42, 0.68);
+  --accent: #7dd3fc;
+  --accent-strong: #22c55e;
+  --muted: #94a3b8;
 }
 
 * {
@@ -15,7 +22,42 @@ body {
   height: 100%;
 }
 
+body {
+  background:
+    radial-gradient(circle at top, rgba(34, 197, 94, 0.14), transparent 28%),
+    radial-gradient(circle at 85% 15%, rgba(125, 211, 252, 0.14), transparent 24%),
+    linear-gradient(180deg, #020617 0%, #040816 45%, #020617 100%);
+  color: #e2e8f0;
+  font-feature-settings: "ss01" on, "cv01" on;
+}
+
 .bg-grid {
   background-image: radial-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 0);
   background-size: 24px 24px;
+}
+
+@layer utilities {
+  .glass-panel {
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.6));
+    border: 1px solid var(--card-border);
+    box-shadow: 0 24px 80px rgba(2, 6, 23, 0.45);
+    backdrop-filter: blur(22px);
+  }
+
+  .glass-chip {
+    background: rgba(15, 23, 42, 0.72);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    backdrop-filter: blur(14px);
+  }
+
+  .text-gradient {
+    background: linear-gradient(135deg, #f8fafc 0%, #7dd3fc 55%, #86efac 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .shadow-glow {
+    box-shadow: 0 0 0 1px rgba(125, 211, 252, 0.1), 0 18px 60px rgba(34, 197, 94, 0.14);
+  }
 }

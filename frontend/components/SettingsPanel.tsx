@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 export interface VideoSpecs {
   duration: number;
@@ -14,7 +14,7 @@ interface SettingsPanelProps {
 
 export default function SettingsPanel({ value, onChange }: SettingsPanelProps) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div>
         <p className="text-sm font-semibold">Video settings</p>
         <p className="text-xs text-slate-400">
@@ -27,10 +27,10 @@ export default function SettingsPanel({ value, onChange }: SettingsPanelProps) {
             key={ratio}
             type="button"
             onClick={() => onChange({ ...value, aspect_ratio: ratio })}
-            className={`rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+            className={`rounded-[22px] border px-4 py-4 text-sm font-semibold transition ${
               value.aspect_ratio === ratio
-                ? "border-emerald-500 bg-emerald-500/10 text-emerald-300"
-                : "border-slate-800 bg-slate-950/60 text-slate-300"
+                ? "border-sky-400/60 bg-sky-400/10 text-sky-200 shadow-glow"
+                : "border-slate-800 bg-slate-950/60 text-slate-300 hover:border-slate-600"
             }`}
           >
             {ratio}
@@ -47,11 +47,11 @@ export default function SettingsPanel({ value, onChange }: SettingsPanelProps) {
             onChange={(event) =>
               onChange({ ...value, duration: Number(event.target.value) })
             }
-            className="rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2"
+            className="rounded-[18px] border border-slate-800 bg-slate-950/60 px-4 py-3 outline-none focus:border-sky-400/60"
           />
         </label>
         <div className="flex flex-col gap-3 text-sm">
-          <label className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3">
+          <label className="flex items-center justify-between rounded-[20px] border border-slate-800 bg-slate-950/60 px-4 py-3">
             Captions
             <input
               type="checkbox"
@@ -62,7 +62,7 @@ export default function SettingsPanel({ value, onChange }: SettingsPanelProps) {
               className="h-4 w-4 accent-emerald-500"
             />
           </label>
-          <label className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3">
+          <label className="flex items-center justify-between rounded-[20px] border border-slate-800 bg-slate-950/60 px-4 py-3">
             Voiceover
             <input
               type="checkbox"

@@ -1,5 +1,7 @@
-﻿import subprocess
+import math
+import subprocess
 from pathlib import Path
+
 import imageio_ffmpeg
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -30,42 +32,132 @@ def render_video(
     print("Scene rendering started")
 
     width, height = ASPECT_RATIOS.get(specs.get("aspect_ratio"), (1080, 1920))
+    total_duration = sum(float(scene["duration"]) for scene in timeline["timeline"])
 
     def _escape_drawtext(text: str) -> str:
-        # Escape characters used by ffmpeg drawtext
         return (
             text.replace("\\", "\\\\")
             .replace(":", "\\:")
             .replace("'", "\\'")
+            .replace(",", "\\,")
             .replace("\n", " ")
         )
 
-    def _build_text_overlay(text: str) -> str:
-        safe = _escape_drawtext(text) if text else " "
-        print("Adding text overlay")
-        return (
-            f"drawtext=text='{safe}':fontcolor=white:fontsize=60:"
-            f"x=(w-text_w)/2:y=h-200:box=1:boxcolor=black@0.4:boxborderw=10"
-        )
+    def _escape_expr(expr: str) -> str:
+        return expr.replace(",", "\\,")
+
+    def _split_text_lines(text: str) -> list[str]:
+        words = text.split()
+        if len(words) <= 3:
+            return [text]
+        midpoint = max(2, math.ceil(len(words) / 2))
+        first_line = " ".join(words[:midpoint]).strip()
+        second_line = " ".join(words[midpoint:]).strip()
+        return [line for line in [first_line, second_line] if line]
+
+    def _caption_y(scene_type: str) -> str:
+        if scene_type in {"hook", "problem"}:
+            return "h*0.50"
+        if scene_type == "proof":
+            return "h*0.42"
+        if scene_type == "cta":
+            return "h*0.74"
+        return "h*0.65"
+
+    def _build_caption_filters(text_value: str | list[str], scene_type: str, duration: int | float) -> list[str]:
+        phrases = text_value if isinstance(text_value, list) else [text_value]
+        phrases = [phrase.strip().upper() for phrase in phrases if str(phrase).strip()]
+        if not phrases:
+            return []
+
+        y_base = _caption_y(scene_type)
+        line_offset = 82
+        filters: list[str] = []
+        total_words = sum(len(phrase.split()) for phrase in phrases) or len(phrases)
+        current_time = 0.0
+
+        for phrase in phrases:
+            words = phrase.split()
+            if not words:
+                continue
+
+            phrase_duration = max(float(duration) * (len(words) / total_words), 0.6)
+            per_word_duration = max(phrase_duration / len(words), 0.35)
+            cumulative_words: list[str] = []
+
+            for idx, word in enumerate(words):
+                cumulative_words.append(word)
+                display_lines = _split_text_lines(" ".join(cumulative_words))
+                start_t = round(current_time + idx * per_word_duration, 2)
+                end_t = round(
+                    min(current_time + (idx + 1) * per_word_duration + 0.2, float(duration)),
+                    2,
+                )
+                fontsize_expr = _escape_expr("if(lt(t,0.3),20+120*t,60)")
+                alpha_expr = _escape_expr("if(lt(t,0.3),t/0.3,1)")
+                enable_expr = _escape_expr(f"between(t,{start_t},{end_t})")
+
+                for line_index, line in enumerate(display_lines):
+                    safe = _escape_drawtext(line)
+                    line_y_base = f"({y_base}+{line_index * line_offset})"
+                    y_expr = _escape_expr(
+                        f"if(lt(t,0.3),{line_y_base}+50*(1-t/0.3),{line_y_base})"
+                    )
+                    filters.append(
+                        "drawtext="
+                        f"text='{safe}':"
+                        "fontcolor=white:"
+                        f"fontsize='{fontsize_expr}':"
+                        "x=(w-text_w)/2:"
+                        f"y={y_expr}:"
+                        f"alpha='{alpha_expr}':"
+                        "borderw=4:"
+                        "bordercolor=black:"
+                        "shadowx=2:"
+                        "shadowy=2:"
+                        "box=1:"
+                        "boxcolor=black@0.4:"
+                        "boxborderw=18:"
+                        f"enable='{enable_expr}'"
+                    )
+
+            current_time = min(current_time + phrase_duration, float(duration))
+
+        return filters
+
+    def _apply_transition_filters(filters: list[str], transition: str, duration: int | float) -> list[str]:
+        transition_lower = transition.lower()
+        if "fade" in transition_lower:
+            fade_out_start = max(float(duration) - 0.35, 0)
+            filters.append("fade=t=in:st=0:d=0.35")
+            filters.append(f"fade=t=out:st={fade_out_start}:d=0.35")
+        elif "slide" in transition_lower:
+            slide_frames = max(int(float(duration) * 30), 1)
+            filters.insert(
+                2,
+                f"crop=w=iw:h=ih:x='min((n/{slide_frames})*iw*0.08, iw*0.08)':y=0",
+            )
+        return filters
 
     scene_files = []
     for idx, scene in enumerate(timeline["timeline"], start=0):
         scene_path = output_dir / f"scene_{idx}.mp4"
         asset = scene.get("asset")
         duration = scene["duration"]
-        scene_text = scene.get("text") or scene.get("scene_text") or ""
+        text_value = scene.get("text") or scene.get("scene_text") or ""
+        scene_text = " ".join(text_value) if isinstance(text_value, list) else text_value
+        scene_type = scene.get("type", "content")
         transition = scene.get("transition", "cut")
+
+        caption_filters = _build_caption_filters(text_value, scene_type, duration)
 
         if asset and asset.lower().endswith((".mp4", ".mov", ".mkv", ".webm")):
             filters = [
                 f"scale={width}:{height}:force_original_aspect_ratio=decrease",
                 f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
-                _build_text_overlay(scene_text),
+                *caption_filters,
             ]
-            if transition == "fade":
-                fade_out_start = max(duration - 0.5, 0)
-                filters.append(f"fade=t=in:st=0:d=0.5")
-                filters.append(f"fade=t=out:st={fade_out_start}:d=0.5")
+            filters = _apply_transition_filters(filters, transition, duration)
             cmd = [
                 ffmpeg_path,
                 "-y",
@@ -83,19 +175,15 @@ def render_video(
             filters = [
                 f"scale={width}:{height}:force_original_aspect_ratio=decrease",
                 f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
-                _build_text_overlay(scene_text),
             ]
-            if transition == "zoom":
+            if "zoom" in transition.lower() or scene_type == "hook":
                 print("Applying zoom effect")
-                zoom_frames = max(int(duration * 30), 1)
-                filters.insert(
-                    2,
-                    f"zoompan=z='min(zoom+0.0015,1.4)':d={zoom_frames}:s={width}x{height}",
+                zoom_frames = max(int(float(duration) * 30), 1)
+                filters.append(
+                    f"zoompan=z='min(zoom+0.0015,1.4)':d={zoom_frames}:s={width}x{height}"
                 )
-            elif transition == "fade":
-                fade_out_start = max(duration - 0.5, 0)
-                filters.append(f"fade=t=in:st=0:d=0.5")
-                filters.append(f"fade=t=out:st={fade_out_start}:d=0.5")
+            filters.extend(caption_filters)
+            filters = _apply_transition_filters(filters, transition, duration)
             cmd = [
                 ffmpeg_path,
                 "-y",
@@ -112,7 +200,9 @@ def render_video(
                 str(scene_path),
             ]
         else:
-            text_filter = _build_text_overlay(scene_text)
+            filters = [*caption_filters] or [
+                "drawtext=text=' ':fontcolor=white:fontsize=70:x=(w-text_w)/2:y=h*0.65"
+            ]
             cmd = [
                 ffmpeg_path,
                 "-y",
@@ -121,7 +211,7 @@ def render_video(
                 "-i",
                 f"color=c=black:s={width}x{height}:d={duration}",
                 "-vf",
-                text_filter,
+                ",".join(filters),
                 "-r",
                 "30",
                 str(scene_path),
@@ -129,6 +219,7 @@ def render_video(
 
         subprocess.run(cmd, check=True, capture_output=True)
         scene_files.append(scene_path)
+
     concat_list = output_dir / "concat.txt"
     concat_lines = []
     for clip in scene_files:
@@ -179,14 +270,15 @@ def render_video(
             "-i",
             music,
             "-filter_complex",
-            "[2:a]volume=0.25[a2];[1:a][a2]amix=inputs=2[aout]",
+            "[1:a]apad[a1];[2:a]volume=0.25,apad[a2];[a1][a2]amix=inputs=2:duration=longest[aout]",
             "-map",
             "0:v",
             "-map",
             "[aout]",
             "-c:v",
             "copy",
-            "-shortest",
+            "-t",
+            str(total_duration),
             str(final_path),
         ]
     elif voiceover:
@@ -203,7 +295,10 @@ def render_video(
             "1:a",
             "-c:v",
             "copy",
-            "-shortest",
+            "-af",
+            "apad",
+            "-t",
+            str(total_duration),
             str(final_path),
         ]
     elif music:
@@ -220,7 +315,10 @@ def render_video(
             "1:a",
             "-c:v",
             "copy",
-            "-shortest",
+            "-af",
+            "apad",
+            "-t",
+            str(total_duration),
             str(final_path),
         ]
     else:
