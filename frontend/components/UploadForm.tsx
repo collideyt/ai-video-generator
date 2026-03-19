@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 
 import AssetUploader from "@/components/AssetUploader";
 import ScriptEditor from "@/components/ScriptEditor";
@@ -20,15 +21,6 @@ interface UploadFormProps {
   onAspectRatioChange?: (value: VideoSpecs["aspect_ratio"]) => void;
   onScenesChange?: (scenes: SceneItem[]) => void;
 }
-
-type StepId = 1 | 2 | 3 | 4;
-
-const workflowSteps: Array<{ id: StepId; title: string; hint: string }> = [
-  { id: 1, title: "Script", hint: "Narration and intent" },
-  { id: 2, title: "Assets", hint: "Clips, logo, and music" },
-  { id: 3, title: "Settings", hint: "Format and AI options" },
-  { id: 4, title: "Generate", hint: "Launch the pipeline" },
-];
 
 const processingSteps = [
   "Analyzing script",
@@ -121,6 +113,52 @@ function buildScenes(script: string, duration: number): SceneItem[] {
   }));
 }
 
+function Section({
+  title,
+  subtitle,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="glass-panel rounded-[28px] p-4">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between gap-4 text-left"
+      >
+        <div>
+          <p className="text-sm font-semibold text-slate-100">{title}</p>
+          <p className="text-xs text-slate-400">{subtitle}</p>
+        </div>
+        <div className="glass-chip rounded-full px-3 py-1 text-xs text-slate-300">
+          {open ? "Hide" : "Show"}
+        </div>
+      </button>
+
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="overflow-hidden"
+          >
+            <div className="pt-4">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 export default function UploadForm({
   onVideoReady,
   onAspectRatioChange,
@@ -137,7 +175,6 @@ export default function UploadForm({
     voiceover: true,
   });
   const [status, setStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
-  const [activeStep, setActiveStep] = useState<StepId>(1);
   const [message, setMessage] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null);
@@ -190,26 +227,10 @@ export default function UploadForm({
     };
   }, [jobId, onVideoReady, status]);
 
-  const canContinueFromScript = script.trim().length > 0;
-  const canContinueFromAssets = assets.length > 0 || logo !== null || music !== null;
-  const canContinueFromSettings = specs.duration >= 5;
-  const canGenerate = canContinueFromScript && status !== "uploading";
-
   const liveStatuses = processingSteps.map((step) => {
     const matching = jobStatus?.steps?.find((item) => item.label === step);
     if (status === "success") {
       return { label: step, state: "done" as const };
-    }
-    if (status === "error") {
-      return {
-        label: step,
-        state:
-          matching?.state === "completed"
-            ? ("done" as const)
-            : matching?.state === "active"
-              ? ("active" as const)
-              : ("idle" as const),
-      };
     }
     if (matching?.state === "completed") {
       return { label: step, state: "done" as const };
@@ -223,7 +244,7 @@ export default function UploadForm({
   const handleSubmit = async () => {
     setStatus("uploading");
     setJobStatus(null);
-    setMessage("Queueing generation job...");
+    setMessage("Uploading assets to backend...");
 
     try {
       const response = await generateVideo({ script, assets, logo, music, specs });
@@ -236,220 +257,78 @@ export default function UploadForm({
   };
 
   return (
-    <div className="space-y-8">
-      <div className="rounded-[28px] border border-slate-800/80 bg-slate-950/50 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {workflowSteps.map((step) => {
-            const isActive = activeStep === step.id;
-            const isComplete = activeStep > step.id;
+    <div className="space-y-4">
+      <Section title="Script" subtitle="Structure the story and prompts for the AI editor." defaultOpen>
+        <ScriptEditor value={script} onChange={setScript} />
+      </Section>
 
-            return (
-              <button
-                key={step.id}
-                type="button"
-                onClick={() => setActiveStep(step.id)}
-                className={`flex min-w-[140px] flex-1 items-center gap-3 rounded-[22px] px-4 py-3 text-left transition ${
-                  isActive ? "shadow-glow bg-sky-400/10" : "bg-slate-900/60 hover:bg-slate-900"
+      <Section title="Assets" subtitle="Manage visual uploads, logo, and soundtrack.">
+        <AssetUploader
+          assets={assets}
+          logo={logo}
+          music={music}
+          onAssetsChange={setAssets}
+          onLogoChange={setLogo}
+          onMusicChange={setMusic}
+        />
+      </Section>
+
+      <Section title="Settings" subtitle="Configure aspect ratio, runtime, and AI services.">
+        <SettingsPanel
+          value={specs}
+          onChange={(nextSpecs) => {
+            setSpecs(nextSpecs);
+            onAspectRatioChange?.(nextSpecs.aspect_ratio);
+          }}
+        />
+      </Section>
+
+      <div className="glass-panel rounded-[28px] p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold text-slate-100">Generate</p>
+            <p className="text-xs text-slate-400">
+              Launch the backend pipeline and monitor live status.
+            </p>
+          </div>
+          <Button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!script.trim() || status === "uploading"}
+            className="px-4 py-2 text-sm shadow-[0_14px_35px_rgba(34,197,94,0.18)] min-w-[132px]"
+          >
+            {status === "uploading" ? "Rendering..." : "Generate"}
+          </Button>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          {liveStatuses.map((item) => (
+            <div
+              key={item.label}
+              className="flex items-center justify-between rounded-[16px] border border-slate-800/90 bg-slate-950/35 px-3.5 py-2.5 text-sm"
+            >
+              <span className="text-slate-300">{item.label}</span>
+              <span
+                className={`rounded-full px-2.5 py-1 text-[11px] ${
+                  item.state === "done"
+                    ? "bg-emerald-400/15 text-emerald-300"
+                    : item.state === "active"
+                      ? "bg-sky-400/15 text-sky-300"
+                      : "bg-slate-800 text-slate-400"
                 }`}
               >
-                <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${
-                    isComplete
-                      ? "bg-emerald-400 text-slate-950"
-                      : isActive
-                        ? "bg-sky-300 text-slate-950"
-                        : "bg-slate-800 text-slate-300"
-                  }`}
-                >
-                  {isComplete ? "\u2713" : step.id}
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-100">{step.title}</p>
-                  <p className="text-xs text-slate-400">{step.hint}</p>
-                </div>
-              </button>
-            );
-          })}
+                {item.state === "done" ? "Done" : item.state === "active" ? "Live" : "Idle"}
+              </span>
+            </div>
+          ))}
         </div>
+
+        {message && (
+          <p className={`mt-4 text-sm ${status === "error" ? "text-rose-400" : "text-slate-300"}`}>
+            {message}
+          </p>
+        )}
       </div>
-
-      {activeStep === 1 && (
-        <div className="glass-panel rounded-[30px] p-6">
-          <ScriptEditor value={script} onChange={setScript} />
-          <div className="mt-6 flex justify-end">
-            <Button type="button" disabled={!canContinueFromScript} onClick={() => setActiveStep(2)}>
-              Continue to Assets
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {activeStep === 2 && (
-        <div className="glass-panel rounded-[30px] p-6">
-          <AssetUploader
-            assets={assets}
-            logo={logo}
-            music={music}
-            onAssetsChange={setAssets}
-            onLogoChange={setLogo}
-            onMusicChange={setMusic}
-          />
-          <div className="mt-6 flex items-center justify-between gap-3">
-            <Button type="button" variant="secondary" onClick={() => setActiveStep(1)}>
-              Back to Script
-            </Button>
-            <Button type="button" disabled={!canContinueFromAssets} onClick={() => setActiveStep(3)}>
-              Continue to Settings
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {activeStep === 3 && (
-        <div className="glass-panel rounded-[30px] p-6">
-          <SettingsPanel
-            value={specs}
-            onChange={(nextSpecs) => {
-              setSpecs(nextSpecs);
-              onAspectRatioChange?.(nextSpecs.aspect_ratio);
-            }}
-          />
-          <div className="mt-6 flex items-center justify-between gap-3">
-            <Button type="button" variant="secondary" onClick={() => setActiveStep(2)}>
-              Back to Assets
-            </Button>
-            <Button type="button" disabled={!canContinueFromSettings} onClick={() => setActiveStep(4)}>
-              Review & Generate
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {activeStep === 4 && (
-        <div className="glass-panel rounded-[30px] p-6">
-          <div className="grid gap-6 xl:grid-cols-[1.1fr,0.9fr]">
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm uppercase tracking-[0.28em] text-slate-500">Ready to launch</p>
-                <h3 className="mt-2 text-2xl font-semibold text-slate-50">
-                  AI pipeline configured for a {specs.aspect_ratio} social cut
-                </h3>
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-                  Collide will analyze your script, map scenes against uploaded assets,
-                  synthesize optional narration, and render a polished export.
-                </p>
-              </div>
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="glass-chip rounded-[22px] px-4 py-4">
-                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Assets</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-100">{assets.length}</p>
-                </div>
-                <div className="glass-chip rounded-[22px] px-4 py-4">
-                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Runtime</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-100">{specs.duration}s</p>
-                </div>
-                <div className="glass-chip rounded-[22px] px-4 py-4">
-                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Scenes</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-100">{scenes.length}</p>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-4">
-                <Button type="button" onClick={handleSubmit} disabled={!canGenerate}>
-                  {status === "uploading" ? "Rendering..." : "\u2728 Generate AI Video"}
-                </Button>
-                <Button type="button" variant="secondary" onClick={() => setActiveStep(3)}>
-                  Back to Settings
-                </Button>
-                {message && (
-                  <span className={`text-sm ${status === "error" ? "text-rose-400" : "text-slate-300"}`}>
-                    {message}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-[26px] border border-slate-800 bg-slate-950/55 p-5">
-              <p className="text-sm font-semibold text-slate-100">Live progress</p>
-              <div className="mt-4 space-y-3">
-                {liveStatuses.map((item) => (
-                  <div
-                    key={item.label}
-                    className="flex items-center justify-between rounded-[18px] border border-slate-800 px-4 py-3 text-sm"
-                  >
-                    <span className="text-slate-300">{item.label}</span>
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs ${
-                        item.state === "done"
-                          ? "bg-emerald-400/15 text-emerald-300"
-                          : item.state === "active"
-                            ? "bg-amber-400/15 text-amber-300"
-                            : "bg-slate-800 text-slate-400"
-                      }`}
-                    >
-                      {item.state === "done"
-                        ? "\u2714 Complete"
-                        : item.state === "active"
-                          ? "\u23f3 In progress"
-                          : "Waiting"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {status === "uploading" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 px-6 backdrop-blur-xl">
-          <div className="glass-panel w-full max-w-4xl rounded-[36px] p-8">
-            <p className="text-sm uppercase tracking-[0.32em] text-slate-500">Collide render pipeline</p>
-            <h2 className="mt-3 text-3xl font-semibold text-gradient">
-              Building your AI video experience
-            </h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-              Your project is moving through the generation stack. These updates now come
-              directly from the backend job status.
-            </p>
-            <div className="mt-3 rounded-full border border-slate-800 px-4 py-2 text-xs text-slate-400">
-              {jobId ? `Job ${jobId.slice(0, 8)} in progress` : "Preparing job"}
-            </div>
-            <div className="mt-8 grid gap-4 md:grid-cols-2">
-              {liveStatuses.map((step) => {
-                const isDone = step.state === "done";
-                const isActive = step.state === "active";
-
-                return (
-                  <div
-                    key={step.label}
-                    className={`rounded-[24px] border px-5 py-5 transition ${
-                      isActive
-                        ? "border-sky-400/50 bg-sky-400/10 shadow-glow"
-                        : isDone
-                          ? "border-emerald-400/30 bg-emerald-400/10"
-                          : "border-slate-800 bg-slate-950/55"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-100">{step.label}</p>
-                        <p className="mt-1 text-xs text-slate-400">
-                          {isDone ? "Completed" : isActive ? "Currently processing" : "Queued"}
-                        </p>
-                      </div>
-                      <div
-                        className={`h-10 w-10 rounded-full ${
-                          isDone ? "bg-emerald-400" : isActive ? "animate-pulse bg-sky-300" : "bg-slate-800"
-                        }`}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ from fastapi import UploadFile
 BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = BASE_DIR / "outputs" / "uploads"
 INDEX_PATH = UPLOAD_DIR / "index.json"
+CHUNK_SIZE = 1024 * 1024
 
 
 def ensure_upload_dir() -> Path:
@@ -17,13 +18,15 @@ def ensure_upload_dir() -> Path:
     return UPLOAD_DIR
 
 
-def get_file_hash_bytes(content: bytes) -> str:
-    return hashlib.md5(content).hexdigest()
-
-
 def get_file_hash(file_path: str | Path) -> str:
+    digest = hashlib.md5()
     with open(file_path, "rb") as handle:
-        return hashlib.md5(handle.read()).hexdigest()
+        while True:
+            chunk = handle.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _read_index() -> dict[str, str]:
@@ -56,9 +59,19 @@ async def save_uploads(files: List[UploadFile]) -> List[str]:
     index = _read_index()
 
     for file in files:
-        content = await file.read()
-        file_hash = get_file_hash_bytes(content)
+        digest = hashlib.md5()
+        content_chunks: list[bytes] = []
+
+        while True:
+            chunk = await file.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            digest.update(chunk)
+            content_chunks.append(chunk)
+
+        file_hash = digest.hexdigest()
         existing_name = index.get(file_hash)
+        await file.seek(0)
 
         if existing_name:
             existing_path = UPLOAD_DIR / existing_name
@@ -67,7 +80,10 @@ async def save_uploads(files: List[UploadFile]) -> List[str]:
                 continue
 
         destination = _unique_destination(file.filename or f"upload_{file_hash}")
-        destination.write_bytes(content)
+        with open(destination, "wb") as handle:
+            for chunk in content_chunks:
+                handle.write(chunk)
+
         index[file_hash] = destination.name
         saved_paths.append(str(destination))
 

@@ -54,10 +54,13 @@ def _filename_tokens(path: str) -> str:
 
 def get_asset(
     assets: list[str],
+    all_assets: list[str],
     global_used_assets: set[str],
     scene_used_assets: set[str],
     previous_scene_assets: set[str],
 ) -> str | None:
+    if not assets:
+        assets = all_assets
     if not assets:
         return None
 
@@ -80,6 +83,18 @@ def get_asset(
 
     for asset in assets:
         if asset not in scene_used_assets:
+            scene_used_assets.add(asset)
+            return asset
+
+    for asset in all_assets:
+        if asset not in global_used_assets and asset not in previous_scene_assets:
+            global_used_assets.add(asset)
+            scene_used_assets.add(asset)
+            return asset
+
+    for asset in all_assets:
+        if asset not in global_used_assets:
+            global_used_assets.add(asset)
             scene_used_assets.add(asset)
             return asset
 
@@ -163,12 +178,14 @@ def match_assets(scenes: list[dict], assets: list[str]) -> list[dict]:
 
             asset = get_asset(
                 candidate_pool,
+                asset_pool,
                 global_used_assets,
                 scene_used_assets,
                 previous_scene_assets,
             )
             if asset is None:
                 asset = get_asset(
+                    asset_pool,
                     asset_pool,
                     global_used_assets,
                     scene_used_assets,
