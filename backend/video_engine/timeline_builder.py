@@ -10,6 +10,7 @@ def build_timeline(scenes: list[dict], specs: dict) -> dict:
                 "end": end,
                 "duration": scene["duration"],
                 "asset": scene.get("asset"),
+                "assets": scene.get("assets", [scene.get("asset")] if scene.get("asset") else []),
                 "text": scene.get("text", [scene["scene_text"]]),
                 "scene_text": scene["scene_text"],
                 "type": scene.get("type", "content"),

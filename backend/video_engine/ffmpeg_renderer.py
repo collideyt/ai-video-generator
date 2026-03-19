@@ -73,55 +73,34 @@ def render_video(
         y_base = _caption_y(scene_type)
         line_offset = 82
         filters: list[str] = []
-        total_words = sum(len(phrase.split()) for phrase in phrases) or len(phrases)
-        current_time = 0.0
+        phrase_duration = max(float(duration) / max(len(phrases), 1), 0.8)
 
-        for phrase in phrases:
-            words = phrase.split()
-            if not words:
-                continue
+        for phrase_index, phrase in enumerate(phrases):
+            display_lines = _split_text_lines(phrase)
+            start_t = round(phrase_index * phrase_duration, 2)
+            end_t = round(min((phrase_index + 1) * phrase_duration, float(duration)), 2)
+            enable_expr = _escape_expr(f"between(t,{start_t},{end_t})")
 
-            phrase_duration = max(float(duration) * (len(words) / total_words), 0.6)
-            per_word_duration = max(phrase_duration / len(words), 0.35)
-            cumulative_words: list[str] = []
-
-            for idx, word in enumerate(words):
-                cumulative_words.append(word)
-                display_lines = _split_text_lines(" ".join(cumulative_words))
-                start_t = round(current_time + idx * per_word_duration, 2)
-                end_t = round(
-                    min(current_time + (idx + 1) * per_word_duration + 0.2, float(duration)),
-                    2,
+            for line_index, line in enumerate(display_lines):
+                safe = _escape_drawtext(line)
+                line_y_base = f"({y_base}+{line_index * line_offset})"
+                filters.append(
+                    "drawtext="
+                    f"text='{safe}':"
+                    "fontcolor=white:"
+                    "fontsize=60:"
+                    "x=(w-text_w)/2:"
+                    f"y={line_y_base}:"
+                    "alpha=1:"
+                    "borderw=4:"
+                    "bordercolor=black:"
+                    "shadowx=2:"
+                    "shadowy=2:"
+                    "box=1:"
+                    "boxcolor=black@0.4:"
+                    "boxborderw=18:"
+                    f"enable='{enable_expr}'"
                 )
-                fontsize_expr = _escape_expr("if(lt(t,0.3),20+120*t,60)")
-                alpha_expr = _escape_expr("if(lt(t,0.3),t/0.3,1)")
-                enable_expr = _escape_expr(f"between(t,{start_t},{end_t})")
-
-                for line_index, line in enumerate(display_lines):
-                    safe = _escape_drawtext(line)
-                    line_y_base = f"({y_base}+{line_index * line_offset})"
-                    y_expr = _escape_expr(
-                        f"if(lt(t,0.3),{line_y_base}+50*(1-t/0.3),{line_y_base})"
-                    )
-                    filters.append(
-                        "drawtext="
-                        f"text='{safe}':"
-                        "fontcolor=white:"
-                        f"fontsize='{fontsize_expr}':"
-                        "x=(w-text_w)/2:"
-                        f"y={y_expr}:"
-                        f"alpha='{alpha_expr}':"
-                        "borderw=4:"
-                        "bordercolor=black:"
-                        "shadowx=2:"
-                        "shadowy=2:"
-                        "box=1:"
-                        "boxcolor=black@0.4:"
-                        "boxborderw=18:"
-                        f"enable='{enable_expr}'"
-                    )
-
-            current_time = min(current_time + phrase_duration, float(duration))
 
         return filters
 
@@ -139,25 +118,34 @@ def render_video(
             )
         return filters
 
-    scene_files = []
-    for idx, scene in enumerate(timeline["timeline"], start=0):
-        scene_path = output_dir / f"scene_{idx}.mp4"
-        asset = scene.get("asset")
-        duration = scene["duration"]
-        text_value = scene.get("text") or scene.get("scene_text") or ""
-        scene_text = " ".join(text_value) if isinstance(text_value, list) else text_value
-        scene_type = scene.get("type", "content")
-        transition = scene.get("transition", "cut")
+    def _build_asset_clip(
+        asset: str | None,
+        duration: float,
+        output_path: Path,
+        transition: str,
+        scene_type: str,
+        apply_caption: bool,
+        caption_filters: list[str],
+    ) -> None:
+        base_filters = [
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease",
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+        ]
+        filters = base_filters[:]
 
-        caption_filters = _build_caption_filters(text_value, scene_type, duration)
+        if asset and not asset.lower().endswith((".mp4", ".mov", ".mkv", ".webm")):
+            if "zoom" in transition.lower() or scene_type == "hook":
+                zoom_frames = max(int(float(duration) * 30), 1)
+                filters.append(
+                    f"zoompan=z='min(zoom+0.0015,1.4)':d={zoom_frames}:s={width}x{height}"
+                )
+
+        if apply_caption:
+            filters.extend(caption_filters)
+
+        filters = _apply_transition_filters(filters, transition, duration)
 
         if asset and asset.lower().endswith((".mp4", ".mov", ".mkv", ".webm")):
-            filters = [
-                f"scale={width}:{height}:force_original_aspect_ratio=decrease",
-                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
-                *caption_filters,
-            ]
-            filters = _apply_transition_filters(filters, transition, duration)
             cmd = [
                 ffmpeg_path,
                 "-y",
@@ -169,21 +157,9 @@ def render_video(
                 ",".join(filters),
                 "-r",
                 "30",
-                str(scene_path),
+                str(output_path),
             ]
         elif asset:
-            filters = [
-                f"scale={width}:{height}:force_original_aspect_ratio=decrease",
-                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
-            ]
-            if "zoom" in transition.lower() or scene_type == "hook":
-                print("Applying zoom effect")
-                zoom_frames = max(int(float(duration) * 30), 1)
-                filters.append(
-                    f"zoompan=z='min(zoom+0.0015,1.4)':d={zoom_frames}:s={width}x{height}"
-                )
-            filters.extend(caption_filters)
-            filters = _apply_transition_filters(filters, transition, duration)
             cmd = [
                 ffmpeg_path,
                 "-y",
@@ -197,10 +173,10 @@ def render_video(
                 ",".join(filters),
                 "-r",
                 "30",
-                str(scene_path),
+                str(output_path),
             ]
         else:
-            filters = [*caption_filters] or [
+            empty_filters = filters or [
                 "drawtext=text=' ':fontcolor=white:fontsize=70:x=(w-text_w)/2:y=h*0.65"
             ]
             cmd = [
@@ -211,13 +187,88 @@ def render_video(
                 "-i",
                 f"color=c=black:s={width}x{height}:d={duration}",
                 "-vf",
-                ",".join(filters),
+                ",".join(empty_filters),
                 "-r",
                 "30",
-                str(scene_path),
+                str(output_path),
             ]
 
         subprocess.run(cmd, check=True, capture_output=True)
+
+    def _scene_asset_durations(total_scene_duration: float, count: int) -> list[float]:
+        if count <= 1:
+            return [total_scene_duration]
+        base = total_scene_duration / count
+        durations = [round(base, 2) for _ in range(count)]
+        durations[-1] = round(total_scene_duration - sum(durations[:-1]), 2)
+        return durations
+
+    scene_files = []
+    for idx, scene in enumerate(timeline["timeline"], start=0):
+        scene_path = output_dir / f"scene_{idx}.mp4"
+        duration = float(scene["duration"])
+        text_value = scene.get("text") or scene.get("scene_text") or ""
+        scene_type = scene.get("type", "content")
+        transition = scene.get("transition", "cut")
+        scene_assets = [asset for asset in scene.get("assets", []) if asset] or [scene.get("asset")]
+        scene_assets = [asset for asset in scene_assets if asset]
+
+        caption_filters = _build_caption_filters(text_value, scene_type, duration)
+
+        if len(scene_assets) <= 1:
+            _build_asset_clip(
+                scene_assets[0] if scene_assets else None,
+                duration,
+                scene_path,
+                transition,
+                scene_type,
+                True,
+                caption_filters,
+            )
+            scene_files.append(scene_path)
+            continue
+
+        subclip_paths: list[Path] = []
+        subclip_durations = _scene_asset_durations(duration, len(scene_assets))
+        for sub_idx, (asset, sub_duration) in enumerate(zip(scene_assets, subclip_durations)):
+            subclip_path = output_dir / f"scene_{idx}_part_{sub_idx}.mp4"
+            _build_asset_clip(
+                asset,
+                sub_duration,
+                subclip_path,
+                transition if sub_idx == len(scene_assets) - 1 else "cut",
+                scene_type,
+                True,
+                caption_filters,
+            )
+            subclip_paths.append(subclip_path)
+
+        scene_concat = output_dir / f"scene_{idx}_concat.txt"
+        scene_concat.write_text(
+            "\n".join(
+                f"file '{str(path.resolve()).replace(chr(92), '/')}'" for path in subclip_paths
+            ),
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [
+                ffmpeg_path,
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(scene_concat),
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                str(scene_path),
+            ],
+            check=True,
+            capture_output=True,
+        )
         scene_files.append(scene_path)
 
     concat_list = output_dir / "concat.txt"
@@ -228,7 +279,7 @@ def render_video(
             raise FileNotFoundError(f"Missing scene file: {clip_path}")
         abs_path = str(clip_path.resolve()).replace("\\", "/")
         concat_lines.append(f"file '{abs_path}'")
-    concat_list.write_text("\n".join(concat_lines))
+    concat_list.write_text("\n".join(concat_lines), encoding="utf-8")
     print("Concat file:", str(concat_list))
 
     temp_video = output_dir / "temp_video.mp4"

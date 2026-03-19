@@ -1,6 +1,6 @@
 import random
+import re
 from pathlib import Path
-import math
 
 from utils.asset_loader import categorize_assets
 
@@ -11,9 +11,17 @@ DEFAULT_UPLOAD_DIRS = [
 ]
 
 HOOK_KEYWORDS = {"hook", "intro", "launch", "reveal", "dynamic", "fast"}
+PROOF_KEYWORDS = {"proof", "testimonial", "changed", "evidence"}
 INTERIOR_KEYWORDS = {"interior", "inside", "indoors", "lobby", "room", "suite"}
 EXTERIOR_KEYWORDS = {"exterior", "outside", "outdoor", "street", "building", "hero"}
 AERIAL_KEYWORDS = {"aerial", "drone", "dji", "birds-eye", "birdseye", "sky"}
+
+
+def _normalized_asset_key(path: str) -> str:
+    asset_path = Path(path)
+    stem = re.sub(r"_\d+$", "", asset_path.stem.lower())
+    stem = re.sub(r"\s+", " ", stem).strip()
+    return f"{stem}{asset_path.suffix.lower()}"
 
 
 def _load_asset_pool(assets: list[str]) -> list[str]:
@@ -23,104 +31,158 @@ def _load_asset_pool(assets: list[str]) -> list[str]:
         if directory.exists():
             discovered.extend(str(path.resolve()) for path in directory.iterdir() if path.is_file())
 
-    categorized = categorize_assets(list(dict.fromkeys(discovered)))
-    unique_assets = categorized["videos"] + categorized["images"]
-    random.shuffle(unique_assets)
-    return unique_assets
+    unique_assets: list[str] = []
+    seen_keys: set[str] = set()
+    for asset in dict.fromkeys(discovered):
+        normalized = _normalized_asset_key(asset)
+        if normalized in seen_keys:
+            continue
+        seen_keys.add(normalized)
+        unique_assets.append(asset)
+
+    categorized = categorize_assets(unique_assets)
+    videos = categorized["videos"]
+    images = categorized["images"]
+    random.shuffle(videos)
+    random.shuffle(images)
+    return videos + images
 
 
 def _filename_tokens(path: str) -> str:
     return Path(path).name.lower()
 
 
-def _pick_from_candidates(
-    candidates: list[str],
-    usage_count: dict[str, int],
-    used_assets: set[str],
+def get_asset(
+    assets: list[str],
+    global_used_assets: set[str],
+    scene_used_assets: set[str],
+    previous_scene_assets: set[str],
 ) -> str | None:
-    if not candidates:
+    if not assets:
         return None
 
-    shuffled = candidates[:]
-    random.shuffle(shuffled)
-    available = [asset for asset in shuffled if asset not in used_assets]
-    pool = available or shuffled
-    return min(pool, key=lambda asset: (usage_count.get(asset, 0), _filename_tokens(asset)))
+    for asset in assets:
+        if asset not in global_used_assets and asset not in previous_scene_assets:
+            global_used_assets.add(asset)
+            scene_used_assets.add(asset)
+            return asset
+
+    for asset in assets:
+        if asset not in global_used_assets:
+            global_used_assets.add(asset)
+            scene_used_assets.add(asset)
+            return asset
+
+    for asset in assets:
+        if asset not in scene_used_assets and asset not in previous_scene_assets:
+            scene_used_assets.add(asset)
+            return asset
+
+    for asset in assets:
+        if asset not in scene_used_assets:
+            scene_used_assets.add(asset)
+            return asset
+
+    return random.choice(assets)
 
 
-def _pick_scene_asset(
-    scene: dict,
-    all_assets: list[str],
-    usage_count: dict[str, int],
-    used_assets: set[str],
-    force_unused: bool,
-) -> str | None:
-    if not all_assets:
-        return None
-
+def _scene_candidates(scene: dict, all_assets: list[str]) -> tuple[list[str], list[str]]:
     categorized = categorize_assets(all_assets)
-    video_assets = categorized["videos"]
-    image_assets = categorized["images"]
+    videos = categorized["videos"]
+    images = categorized["images"]
 
     scene_type = scene.get("type", "").lower()
     scene_text = scene.get("scene_text", "").lower()
     visual_hint = scene.get("visual_hint", "").lower()
-    combined_text = f"{scene_type} {scene_text} {visual_hint}"
+    combined = f"{scene_type} {scene_text} {visual_hint}"
 
-    aerial_candidates = [asset for asset in all_assets if "dji" in _filename_tokens(asset)]
-    interior_candidates = [asset for asset in all_assets if "interior" in _filename_tokens(asset)]
-    exterior_candidates = [asset for asset in all_assets if "exterior" in _filename_tokens(asset)]
-    hook_candidates = [
+    aerial_videos = [asset for asset in videos if "dji" in _filename_tokens(asset)]
+    interior_images = [asset for asset in images if "interior" in _filename_tokens(asset)]
+    exterior_images = [asset for asset in images if "exterior" in _filename_tokens(asset)]
+    hook_videos = [
         asset
-        for asset in (video_assets or all_assets)
-        if any(keyword in _filename_tokens(asset) or keyword in combined_text for keyword in HOOK_KEYWORDS)
+        for asset in videos
+        if any(keyword in _filename_tokens(asset) or keyword in combined for keyword in HOOK_KEYWORDS)
     ]
 
-    if scene_type == "hook":
-        candidates = hook_candidates or video_assets or all_assets
-        if force_unused:
-            candidates = [asset for asset in candidates if asset not in used_assets] or candidates
-        return _pick_from_candidates(candidates, usage_count, used_assets)
-    if any(keyword in combined_text for keyword in AERIAL_KEYWORDS):
-        candidates = aerial_candidates or video_assets or all_assets
-        if force_unused:
-            candidates = [asset for asset in candidates if asset not in used_assets] or candidates
-        return _pick_from_candidates(candidates, usage_count, used_assets)
-    if any(keyword in combined_text for keyword in INTERIOR_KEYWORDS):
-        candidates = interior_candidates or image_assets or all_assets
-        if force_unused:
-            candidates = [asset for asset in candidates if asset not in used_assets] or candidates
-        return _pick_from_candidates(candidates, usage_count, used_assets)
-    if any(keyword in combined_text for keyword in EXTERIOR_KEYWORDS):
-        candidates = exterior_candidates or image_assets or all_assets
-        if force_unused:
-            candidates = [asset for asset in candidates if asset not in used_assets] or candidates
-        return _pick_from_candidates(candidates, usage_count, used_assets)
+    primary: list[str] = []
+    secondary: list[str] = []
 
-    remaining = [asset for asset in all_assets if asset not in used_assets]
-    fallback_pool = remaining if force_unused and remaining else remaining or all_assets
-    random.shuffle(fallback_pool)
-    return min(fallback_pool, key=lambda asset: (usage_count.get(asset, 0), _filename_tokens(asset)))
+    if scene_type == "hook":
+        primary.extend(hook_videos or videos)
+        secondary.extend(images)
+    elif scene_type == "proof" or any(keyword in combined for keyword in PROOF_KEYWORDS):
+        primary.extend(videos)
+        secondary.extend(images)
+    else:
+        primary.extend(videos)
+        secondary.extend(images)
+
+    if any(keyword in combined for keyword in AERIAL_KEYWORDS):
+        primary = aerial_videos or primary
+    if any(keyword in combined for keyword in INTERIOR_KEYWORDS):
+        secondary = interior_images or secondary
+    if any(keyword in combined for keyword in EXTERIOR_KEYWORDS):
+        secondary = exterior_images or secondary
+
+    return primary, secondary
+
+
+def _assets_per_scene(scene: dict, asset_pool: list[str]) -> int:
+    duration = float(scene.get("duration", 3))
+    scene_type = scene.get("type", "").lower()
+    if len(asset_pool) <= 1:
+        return 1
+    if scene_type in {"hook", "proof", "shift", "future", "cta"}:
+        return min(3, len(asset_pool))
+    if duration >= 4:
+        return min(2, len(asset_pool))
+    return 1
 
 
 def match_assets(scenes: list[dict], assets: list[str]) -> list[dict]:
     asset_pool = _load_asset_pool(assets)
-    usage_count: dict[str, int] = {}
-    used_assets: set[str] = set()
     matched = []
-    target_unique_assets = (
-        min(len(scenes), math.ceil(len(asset_pool) * 0.8))
-        if len(asset_pool) > 5
-        else min(len(scenes), len(asset_pool))
-    )
+    global_used_assets: set[str] = set()
+    previous_scene_assets: set[str] = set()
 
     for scene in scenes:
-        force_unused = len(used_assets) < target_unique_assets
-        asset = _pick_scene_asset(scene, asset_pool, usage_count, used_assets, force_unused)
-        if asset:
-            usage_count[asset] = usage_count.get(asset, 0) + 1
-            used_assets.add(asset)
-        scene["asset"] = asset
+        scene_used_assets: set[str] = set()
+        primary, secondary = _scene_candidates(scene, asset_pool)
+        clip_count = _assets_per_scene(scene, asset_pool)
+
+        selected_assets: list[str] = []
+        last_type: str | None = None
+
+        for clip_index in range(clip_count):
+            candidate_pool = primary if clip_index % 2 == 0 else secondary
+            if last_type == "video" and secondary:
+                candidate_pool = secondary
+            elif last_type == "image" and primary:
+                candidate_pool = primary
+
+            asset = get_asset(
+                candidate_pool,
+                global_used_assets,
+                scene_used_assets,
+                previous_scene_assets,
+            )
+            if asset is None:
+                asset = get_asset(
+                    asset_pool,
+                    global_used_assets,
+                    scene_used_assets,
+                    previous_scene_assets,
+                )
+            if asset is None:
+                break
+
+            selected_assets.append(asset)
+            last_type = "video" if asset.lower().endswith((".mp4", ".mov", ".mkv", ".webm")) else "image"
+
+        scene["assets"] = selected_assets
+        scene["asset"] = selected_assets[0] if selected_assets else None
         matched.append(scene)
+        previous_scene_assets = set(selected_assets)
 
     return matched
