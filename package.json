@@ -6,7 +6,8 @@
   ],
   "scripts": {
     "install:all": "npm install -w frontend",
-    "dev": "concurrently -k \"npm run dev -w frontend\" \"npm run dev:backend\"",
+    "dev": "concurrently -k \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "dev:frontend": "powershell -NoLogo -NoProfile -Command \"Set-Location frontend; node ..\\node_modules\\next\\dist\\bin\\next dev\"",
     "dev:backend": "backend\\.venv\\Scripts\\python -m uvicorn main:app --reload --app-dir backend",
     "build": "npm run build -w frontend",
     "start": "npm run start -w frontend",

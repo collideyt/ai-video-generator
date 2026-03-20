@@ -18,7 +18,17 @@ def build_timeline(scenes: list[dict], specs: dict) -> dict:
                 "transition": scene.get("transition", "cut"),
                 "style": scene.get("style", "default"),
                 "edit_style": scene.get("edit_style", "standard"),
+                "scene_preset": scene.get("scene_preset", scene.get("type", "content")),
                 "text_overlay": scene.get("text_overlay", "default"),
+                "pace": scene.get("pace", "medium"),
+                "text_animation": scene.get("text_animation", "fade_in"),
+                "motion_style": scene.get("motion_style", "push_in"),
+                "motion_profile": scene.get("motion_profile", "steady"),
+                "motion_intensity": scene.get("motion_intensity", "medium"),
+                "subclip_motion_cycle": scene.get("subclip_motion_cycle", [scene.get("motion_style", "push_in")]),
+                "text_layout": scene.get("text_layout", "center_stack"),
+                "clip_duration_range": scene.get("clip_duration_range", [0.8, 1.3]),
+                "transition_pool": scene.get("transition_pool", [scene.get("transition", "cut")]),
             }
         )
 

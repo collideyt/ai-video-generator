@@ -125,12 +125,15 @@ def _scene_candidates(scene: dict, all_assets: list[str]) -> tuple[list[str], li
 
     if scene_type == "hook":
         primary.extend(hook_videos or videos)
+        secondary.extend(videos)
         secondary.extend(images)
     elif scene_type == "proof" or any(keyword in combined for keyword in PROOF_KEYWORDS):
         primary.extend(videos)
+        secondary.extend(videos)
         secondary.extend(images)
     else:
         primary.extend(videos)
+        secondary.extend(videos)
         secondary.extend(images)
 
     if any(keyword in combined for keyword in AERIAL_KEYWORDS):
@@ -146,13 +149,25 @@ def _scene_candidates(scene: dict, all_assets: list[str]) -> tuple[list[str], li
 def _assets_per_scene(scene: dict, asset_pool: list[str]) -> int:
     duration = float(scene.get("duration", 3))
     scene_type = scene.get("type", "").lower()
+    clip_duration_range = scene.get("clip_duration_range") or [0.8, 1.3]
+    min_clip_duration = max(float(clip_duration_range[0]), 0.4)
+    categorized = categorize_assets(asset_pool)
+    videos = categorized["videos"]
+
     if len(asset_pool) <= 1:
         return 1
-    if scene_type in {"hook", "proof", "shift", "future", "cta"}:
+    if duration <= 1.5:
+        return min(max(1, round(duration / min_clip_duration)), len(asset_pool), 3)
+
+    if scene_type in {"hook", "problem", "shift"}:
+        preferred = 4 if len(videos) >= 2 else 3
+        return min(preferred, len(asset_pool))
+    if scene_type in {"proof", "future", "cta"}:
+        preferred = 3 if len(videos) >= 1 else 2
+        return min(preferred, len(asset_pool))
+    if duration >= 4 or len(videos) >= 2:
         return min(3, len(asset_pool))
-    if duration >= 4:
-        return min(2, len(asset_pool))
-    return 1
+    return min(2, len(asset_pool))
 
 
 def match_assets(scenes: list[dict], assets: list[str]) -> list[dict]:
@@ -170,10 +185,8 @@ def match_assets(scenes: list[dict], assets: list[str]) -> list[dict]:
         last_type: str | None = None
 
         for clip_index in range(clip_count):
-            candidate_pool = primary if clip_index % 2 == 0 else secondary
-            if last_type == "video" and secondary:
-                candidate_pool = secondary
-            elif last_type == "image" and primary:
+            candidate_pool = primary if clip_index == 0 else secondary
+            if last_type == "image" and primary:
                 candidate_pool = primary
 
             asset = get_asset(
