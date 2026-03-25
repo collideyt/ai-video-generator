@@ -1,9 +1,10 @@
+import asyncio
 import json
 import uuid
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -41,34 +42,92 @@ class Specs(BaseModel):
 
 @app.post("/generate-video")
 async def generate_video_endpoint(
-    background_tasks: BackgroundTasks,
-    script: str = Form(...),
-    specs: str = Form(...),
+    request: Request,
+    prompt: Optional[str] = Form(None),
+    style: Optional[str] = Form("cinematic"),
+    voice: Optional[str] = Form("female"),
+    duration: Optional[int] = Form(30),
+    script: Optional[str] = Form(None),
+    specs: Optional[str] = Form(None),
+    images: Optional[List[UploadFile]] = File(None),
+    videos: Optional[List[UploadFile]] = File(None),
+    audio: Optional[UploadFile] = File(None),
     assets: Optional[List[UploadFile]] = File(None),
     logo: Optional[UploadFile] = File(None),
     music: Optional[UploadFile] = File(None),
 ):
-    print("Received script:")
-    print(script)
-    specs_obj = Specs(**json.loads(specs))
+    content_type = request.headers.get("content-type", "")
+    is_json = "application/json" in content_type
 
-    saved_assets = await save_uploads(assets or [])
-    saved_logo = await save_uploads([logo] if logo else [])
-    saved_music = await save_uploads([music] if music else [])
+    if is_json:
+        data = await request.json()
+        prompt = data.get("prompt")
+        style = data.get("style", "cinematic")
+        voice = data.get("voice", "female")
+        duration = int(data.get("duration", 30))
+        script = data.get("script")
 
+    if not script and not prompt:
+        raise HTTPException(status_code=400, detail="script or prompt is required")
+
+    final_specs = {
+        "duration": duration,
+        "aspect_ratio": "16:9",
+        "captions": True,
+        "voiceover": (voice != "none"),
+        "style": style,
+        "voice": voice,
+    }
+
+    # If legacy specs JSON was provided, override generated ones
+    if specs and not is_json:
+        specs_obj = Specs(**json.loads(specs))
+        final_specs.update(specs_obj.model_dump())
+
+    import time
+    start_time = time.time()
     job_id = uuid.uuid4().hex
     initialize_job_status(job_id)
 
-    def run_job() -> None:
+    # Save uploads before returning so file handles are valid for the background task.
+    saved_images, saved_videos, saved_audio, saved_legacy_assets, saved_logo, saved_music = await asyncio.gather(
+        save_uploads(images or []),
+        save_uploads(videos or []),
+        save_uploads([audio] if audio else []),
+        save_uploads(assets or []),
+        save_uploads([logo] if logo else []),
+        save_uploads([music] if music else []),
+    )
+
+    final_assets = {
+        "images": saved_images + saved_legacy_assets,
+        "videos": saved_videos,
+        "audio": saved_audio[0] if saved_audio else None
+    }
+
+    logo_path = saved_logo[0] if saved_logo else None
+    music_path = saved_music[0] if saved_music else None
+
+    async def run_job() -> None:
         try:
-            generate_video(
+            result = await asyncio.to_thread(
+                generate_video,
                 script=script,
-                assets=saved_assets,
-                logo=saved_logo[0] if saved_logo else None,
-                music=saved_music[0] if saved_music else None,
-                specs=specs_obj.model_dump(),
+                prompt=prompt,
+                assets=final_assets,
+                logo=logo_path,
+                music=music_path,
+                specs=final_specs,
                 job_id=job_id,
             )
+            time_taken = time.time() - start_time
+            current = read_job_status(job_id) or {}
+            current["time_taken"] = time_taken
+            current["script"] = result.get("script", script)
+            current["scenes"] = result.get("scenes", [])
+            current["used_assets"] = result.get("used_assets", False)
+            from utils.job_status import write_job_status
+            write_job_status(job_id, current)
         except Exception as exc:
             current = read_job_status(job_id)
             update_job_status(
@@ -83,8 +142,8 @@ async def generate_video_endpoint(
                 error=str(exc),
             )
 
-    background_tasks.add_task(run_job)
-
+    asyncio.create_task(run_job())
+    
     return {
         "job_id": job_id,
         "status_url": f"/job-status/{job_id}",

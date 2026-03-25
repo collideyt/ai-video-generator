@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -20,11 +20,14 @@ export default function Home() {
               final video with FFmpeg.
             </p>
             <div className="flex flex-wrap gap-4">
-              <Link href="/dashboard">
-                <Button>Go to Dashboard</Button>
+              <Link href="/generate">
+                <Button className="bg-indigo-600 hover:bg-indigo-500 text-white border-0">Auto Generate AI Video</Button>
               </Link>
               <Link href="/upload">
-                <Button variant="secondary">Start a Project</Button>
+                <Button variant="secondary">Manual Studio Editor</Button>
+              </Link>
+              <Link href="/dashboard">
+                <Button variant="secondary">Dashboard</Button>
               </Link>
             </div>
           </div>

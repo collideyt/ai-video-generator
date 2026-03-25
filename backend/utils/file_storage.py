@@ -6,7 +6,7 @@ from typing import List
 from fastapi import UploadFile
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-UPLOAD_DIR = BASE_DIR / "outputs" / "uploads"
+UPLOAD_DIR = BASE_DIR / "uploads"
 INDEX_PATH = UPLOAD_DIR / "index.json"
 CHUNK_SIZE = 1024 * 1024
 
@@ -38,19 +38,10 @@ def _write_index(index: dict[str, str]) -> None:
     INDEX_PATH.write_text(json.dumps(index, indent=2), encoding="utf-8")
 
 
+import uuid
 def _unique_destination(filename: str) -> Path:
-    candidate = UPLOAD_DIR / filename
-    if not candidate.exists():
-        return candidate
-
-    stem = candidate.stem
-    suffix = candidate.suffix
-    counter = 1
-    while True:
-        next_candidate = UPLOAD_DIR / f"{stem}_{counter}{suffix}"
-        if not next_candidate.exists():
-            return next_candidate
-        counter += 1
+    suffix = Path(filename).suffix
+    return UPLOAD_DIR / f"{uuid.uuid4().hex}{suffix}"
 
 
 async def save_uploads(files: List[UploadFile]) -> List[str]:
@@ -60,14 +51,15 @@ async def save_uploads(files: List[UploadFile]) -> List[str]:
 
     for file in files:
         digest = hashlib.md5()
-        content_chunks: list[bytes] = []
+        temp_destination = _unique_destination(file.filename or "upload_tmp")
 
-        while True:
-            chunk = await file.read(CHUNK_SIZE)
-            if not chunk:
-                break
-            digest.update(chunk)
-            content_chunks.append(chunk)
+        with open(temp_destination, "wb") as handle:
+            while True:
+                chunk = await file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                handle.write(chunk)
 
         file_hash = digest.hexdigest()
         existing_name = index.get(file_hash)
@@ -76,13 +68,12 @@ async def save_uploads(files: List[UploadFile]) -> List[str]:
         if existing_name:
             existing_path = UPLOAD_DIR / existing_name
             if existing_path.exists():
+                temp_destination.unlink(missing_ok=True)
                 saved_paths.append(str(existing_path))
                 continue
 
         destination = _unique_destination(file.filename or f"upload_{file_hash}")
-        with open(destination, "wb") as handle:
-            for chunk in content_chunks:
-                handle.write(chunk)
+        temp_destination.rename(destination)
 
         index[file_hash] = destination.name
         saved_paths.append(str(destination))

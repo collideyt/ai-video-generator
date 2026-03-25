@@ -6,6 +6,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 OUTPUTS_DIR = BASE_DIR / "outputs"
 
 PIPELINE_STEPS = [
+    "Generating script",
     "Analyzing script",
     "Planning scenes",
     "Matching assets",
@@ -77,6 +78,11 @@ def update_job_status(
     return write_job_status(job_id, payload)
 
 
+def _latest_final_file(directory: Path) -> Path | None:
+    candidates = sorted(directory.glob("final_video*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates[0] if candidates else None
+
+
 def find_latest_render() -> dict | None:
     if not OUTPUTS_DIR.exists():
         return None
@@ -86,13 +92,13 @@ def find_latest_render() -> dict | None:
         if not directory.is_dir() or directory.name == "uploads":
             continue
 
-        final_video = directory / "final_video.mp4"
-        if not final_video.exists():
+        final_video = _latest_final_file(directory)
+        if not final_video:
             continue
 
         payload = {
             "job_id": directory.name,
-            "video_url": f"/outputs/{directory.name}/final_video.mp4",
+            "video_url": f"/outputs/{directory.name}/{final_video.name}",
             "updated_at": datetime.fromtimestamp(final_video.stat().st_mtime, timezone.utc).isoformat(),
             "job_status": read_job_status(directory.name),
         }

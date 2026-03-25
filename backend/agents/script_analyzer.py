@@ -1,5 +1,7 @@
+import json
 import math
 import re
+from typing import Any
 
 SCENE_SPLIT_RE = re.compile(r"\n?\s*-{3,}\s*\n?")
 SCENE_HEADER_RE = re.compile(
@@ -71,10 +73,10 @@ def _parse_time_range(raw_range: str) -> tuple[float, float, int]:
     return start, end, duration_value
 
 
-def parse_structured_script(script: str, target_duration: int = 30) -> list[dict]:
+def _parse_structured_bracket(script: str, target_duration: int = 30) -> list[dict]:
     blocks = [block.strip() for block in SCENE_SPLIT_RE.split(script.strip()) if block.strip()]
     if not blocks or not any(SCENE_HEADER_RE.search(block) for block in blocks):
-        return _split_plain_text_script(script, target_duration=target_duration)
+        return []
 
     scenes: list[dict] = []
 
@@ -127,8 +129,61 @@ def parse_structured_script(script: str, target_duration: int = 30) -> list[dict
             }
         )
 
-    print(f"Structured scenes detected: {len(scenes)}")
+    print(f"Structured scenes detected (bracket): {len(scenes)}")
     return scenes
+
+
+def _parse_json_script(script: str) -> list[dict]:
+    try:
+        payload: Any = json.loads(script)
+    except Exception:
+        return []
+
+    scenes = payload.get("scenes") if isinstance(payload, dict) else None
+    if not isinstance(scenes, list) or not scenes:
+        return []
+
+    parsed: list[dict] = []
+    start_time = 0.0
+    for idx, scene in enumerate(scenes, start=1):
+        if not isinstance(scene, dict):
+            continue
+        text = str(scene.get("text", "")).strip()
+        if not text:
+            continue
+        duration = float(scene.get("duration", 5)) or 5
+        duration = max(2.0, round(duration, 2))
+        end_time = start_time + duration
+        parsed.append(
+            {
+                "scene": idx,
+                "scene_type": _normalize_scene_type(str(scene.get("type", "content"))),
+                "start": round(start_time, 2),
+                "end": round(end_time, 2),
+                "duration": duration,
+                "text": [text],
+                "visual_hint": "",
+                "transition": "cut",
+                "style": "default",
+                "raw_text": text,
+            }
+        )
+        start_time = end_time
+
+    print(f"Structured scenes detected (json): {len(parsed)}")
+    return parsed
+
+
+def parse_structured_script(script: str, target_duration: int = 30) -> list[dict]:
+    json_scenes = _parse_json_script(script)
+    if json_scenes:
+        return json_scenes
+
+    bracket_scenes = _parse_structured_bracket(script, target_duration)
+    if bracket_scenes:
+        return bracket_scenes
+
+    return _split_plain_text_script(script, target_duration=target_duration)
 
 
 def split_script(script: str, target_duration: int = 30) -> list[dict]:

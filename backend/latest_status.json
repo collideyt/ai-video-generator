@@ -1,0 +1,30 @@
+{
+  "job_id": "a1b1be466959450c9b4ce7d8becb9fa2",
+  "status": "completed",
+  "current_step": "Rendering video",
+  "steps": [
+    {
+      "label": "Analyzing script",
+      "state": "completed"
+    },
+    {
+      "label": "Planning scenes",
+      "state": "completed"
+    },
+    {
+      "label": "Matching assets",
+      "state": "completed"
+    },
+    {
+      "label": "Generating voiceover",
+      "state": "completed"
+    },
+    {
+      "label": "Rendering video",
+      "state": "completed"
+    }
+  ],
+  "video_url": "/outputs/a1b1be466959450c9b4ce7d8becb9fa2/final_video.mp4",
+  "error": null,
+  "updated_at": "2026-03-21T15:03:47.139681+00:00"
+}
